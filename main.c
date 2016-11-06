@@ -3,7 +3,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 #define MAGIC_T 12345678
+#define max(a, b) ((a)>(b)?(a):(b))
 
 typedef struct __header_t {
 	int size;
@@ -32,6 +34,20 @@ int m_error;
 
 node_t *freelist;
 
+void listfree()
+{
+  node_t *p = freelist;
+  int flag = 0;
+  while (p != NULL)
+  {
+    if (flag) printf(" -> ");
+    flag = 1;
+    printf("(%p){size: %d, next: %p}", p, p -> size, p -> next);
+    p = p -> next;
+  }
+  printf("\n");
+}
+
 int mem_init(int size_of_region)
 {
 	node_t *head = mmap(NULL, size_of_region, PROT_READ | PROT_WRITE, 
@@ -48,7 +64,7 @@ int mem_init(int size_of_region)
 	else
 	{
 		m_error = errno;
-		return (void *)-1;
+		return -1;
 	}
 }
 
@@ -73,7 +89,7 @@ void *mem_alloc(int size, int style)
 	node_t *parent = NULL;
 	node_t *fit = NULL;
 	node_t *fit_parent = NULL;
-	int _actsize = size + sizeof(header_t);
+	int _actsize = size + max(sizeof(header_t), sizeof(node_t));
 	int lSize = 0;
 	int flag = 0;
 	while (head != NULL)
@@ -140,64 +156,66 @@ int mem_free(void *ptr)
 		int lsize = hptr -> size;
 		int ishead = 0;
 		node_t *it = freelist;
-		node_t *prev = NULL, *next = NULL;
+		node_t *prevn = NULL, *nextn = NULL;
 		for (; it != NULL; it = it->next)
 		{
 			if ((void *)it < (void *)hptr)
-	  			prev = (node_t *)it;
-			else if ((void *)it >= (void *)hptr + sizeof(header_t) + lsize)
+	  			prevn = (node_t *)it;
+			else if ((void *)it >= (void *)hptr + max(sizeof(header_t), sizeof(node_t)) + lsize)
 			{
-	  			next = (node_t *)it;
+	  			nextn = (node_t *)it;
 				break;
 			}
 		}
 	 	node_t *cur = (node_t *)hptr;
+	 	int nextn_size = nextn -> size;
+	 	void *nextn_next = nextn -> next;
 		cur -> next = NULL;
 		int prevmerge = 0;
-		if (prev != NULL)
+		if (prevn != NULL)
 		{
-			void *edge = (void *)prev + sizeof(node_t) + prev->size;
+			void *edge = (void *)prevn + sizeof(node_t) + prevn->size;
 			if (edge < (void *)hptr)
 			{
-				prev -> next = cur;	
-	 			cur -> size = sizeof(header_t) + lsize;
+				prevn -> next = cur;	
+	 			cur -> size = lsize;
 			}
 	 		else if (edge == hptr)
  	 		{
-				prev -> size += sizeof(header_t) + lsize;
+				prevn -> size += max(sizeof(header_t),sizeof(node_t)) +lsize;
 				prevmerge = 1;
  	  		}
 		}
 		else
 		{
-	 		cur -> size = sizeof(header_t) + lsize;
+	 		cur -> size = lsize;
 		    freelist = cur;
 		}
-		if (next != NULL)
+		if (nextn != NULL)
 		{
-			void *edge = (void *)cur + sizeof(header_t) + lsize;
-			if (edge < (void *)next)
+			void *edge = (void *)cur + max(sizeof(header_t),sizeof(node_t)) + lsize;
+			if (edge < (void *)nextn)
 			{
 				if (!prevmerge)
 				{
-					cur -> next = next;
+					cur -> next = nextn;
 				}
 				else
 				{
-					prev -> next = next;
+					prevn -> next = nextn;
 				}
 			}
-			else if (edge == next)
+			else if (edge == (void *)nextn)
 			{
 				if (!prevmerge)
 				{
-					cur -> next = next -> next;
-					cur -> size += (sizeof(node_t)+next->size);
+					cur -> next = nextn -> next;
+					cur -> size += sizeof(node_t) + nextn_size;
 				}
 				else
 				{
-					prev -> next = next -> next;
-					prev -> size += (sizeof(node_t) + next->size);
+					prevn -> next = nextn -> next;
+					prevn -> size += sizeof(node_t) + nextn_size;
 				}
 			}
 		}
@@ -208,10 +226,36 @@ int mem_free(void *ptr)
 
 void myWork()
 {
-	int *a = mem_alloc(sizeof(int), M_BESTFIT);
-    *a = 5;
-    printf("the value is %d\n", *a);
-    mem_free(a);
+  int *a = mem_alloc(sizeof(int) * 3, M_BESTFIT);
+  int i;
+  for (i = 0; i< 3; ++i)
+    scanf("%d", a+i);
+  listfree();
+  char *b = mem_alloc(sizeof(char) * 200, M_BESTFIT);
+  strcpy(b, "Welcome to use Microsoft Windows (Linux kernel)");
+  for (i = 0; i<3; ++i)
+    printf("%d\n", a[i]);
+  printf("%s\n", b);
+  listfree();
+  double *c = mem_alloc(sizeof(double), M_BESTFIT);
+  *c = 0.5/12;
+  printf("%f\n", *c);
+  listfree();
+  mem_free(b);
+  puts("After release char *b...");
+  listfree();
+  short *d = mem_alloc(sizeof(short) * 10, M_BESTFIT);
+  puts("After alloc short *d...");
+  listfree();
+  mem_free(a);
+  puts("After release int *a...");
+  listfree();
+  mem_free(c);
+  puts("After release double *c...");
+  listfree();
+  mem_free(d);
+  puts("After release short *d...");
+  listfree();
 }
 
 
@@ -219,6 +263,6 @@ int main()
 {
 	int page = getpagesize();
 	mem_init(page);
-	myWork();
+	//myWork();
 	mem_destroy();
 }
